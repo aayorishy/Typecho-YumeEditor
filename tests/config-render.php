@@ -45,7 +45,7 @@ $xpath = $parsed['xpath'];
 // 品牌与版本
 ym_check($xpath->query('//div[contains(@class,"ym-brand")]')->length === 1, 'brand block');
 ym_check($xpath->query('//div[@class="ym-config"]')->item(0)->getAttribute('data-version') === '1.0.0', 'version badge');
-ym_check(strpos($html, 'ayorishy') !== false, 'author credit');
+ym_check(strpos($html, 'aayorishy') !== false, 'author credit');
 ym_check(strpos($html, 'AAEditor') === false, 'no legacy plugin name');
 
 // 导航与静态面板
