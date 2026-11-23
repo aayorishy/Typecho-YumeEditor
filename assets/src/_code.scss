@@ -1,0 +1,191 @@
+// ---------------------------------------------------------------------------
+// YumeEditor · code blocks
+// ---------------------------------------------------------------------------
+// Shared by the front end and the admin preview. The header, language chip and
+// copy button are injected by `utils/codeBlocks.js`, so the class hooks below
+// must stay in sync with it.
+// ---------------------------------------------------------------------------
+
+@import "editor/code-block-enhance";
+
+@mixin code-block-styles {
+  pre {
+    position: relative;
+    display: block;
+    margin: 1.5em 0;
+    border: 1px solid var(--ym-line);
+    border-radius: var(--ym-radius-md);
+    background: var(--ym-code-bg);
+    color: var(--ym-code-ink);
+    font-family: var(--ym-font-mono);
+    font-size: 0.86em;
+    line-height: 1.65;
+    overflow: hidden;
+    tab-size: 4;
+
+    &:first-child {
+      margin-top: 0;
+    }
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+
+    > code {
+      position: relative;
+      display: block;
+      min-width: 100%;
+      max-width: 100%;
+      padding: 1rem 1.1rem;
+      box-sizing: border-box;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      white-space: pre;
+      overflow-x: auto;
+      overscroll-behavior-x: contain;
+      @include ym-scrollbar;
+    }
+
+    > code[class*="language-"] {
+      background-color: transparent;
+    }
+
+    &.styled {
+      --ym-pre-copy-offset: 0.5rem;
+      --ym-pre-copy-size: 1.75rem;
+      padding-top: 0;
+
+      > code {
+        padding-top: 1rem;
+      }
+    }
+
+    .ym-copy,
+    .copy {
+      position: absolute;
+      top: var(--ym-pre-copy-offset, 0.5rem);
+      right: 0.5rem;
+      z-index: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: var(--ym-pre-copy-size, 1.75rem);
+      height: var(--ym-pre-copy-size, 1.75rem);
+      padding: 0;
+      border: 1px solid var(--ym-code-line);
+      border-radius: var(--ym-radius-sm);
+      background: var(--ym-surface-strong);
+      color: var(--ym-code-muted);
+      cursor: pointer;
+      appearance: none;
+      transition: color 0.18s var(--ym-ease), background-color 0.18s var(--ym-ease),
+        border-color 0.18s var(--ym-ease), transform 0.18s var(--ym-ease);
+
+      &:hover {
+        border-color: var(--ym-muted-2);
+        color: var(--ym-ink);
+        transform: translateY(-1px);
+      }
+
+      &:active {
+        transform: translateY(0) scale(0.96);
+      }
+
+      &:focus-visible {
+        @include ym-focus-ring;
+      }
+
+      &[aria-busy="true"] {
+        pointer-events: none;
+      }
+
+      &::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        top: 50%;
+        right: calc(100% + 0.5rem);
+        z-index: 6;
+        padding: 0.3em 0.5em;
+        border-radius: 6px;
+        background: var(--ym-ink);
+        color: var(--ym-paper);
+        font-family: var(--ym-font-ui);
+        font-size: 0.7rem;
+        font-weight: 500;
+        line-height: 1.2;
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transform: translate(0.2rem, -50%);
+        transition: opacity 0.16s var(--ym-ease), transform 0.16s var(--ym-ease);
+      }
+
+      &:hover::after,
+      &:focus-visible::after {
+        opacity: 1;
+        transform: translate(0, -50%);
+      }
+
+      .copy-icon {
+        position: absolute;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: opacity 0.18s var(--ym-ease), transform 0.22s var(--ym-ease);
+      }
+
+      .copy-icon svg {
+        width: 0.9rem;
+        height: 0.9rem;
+        fill: currentColor;
+      }
+
+      .copy-icon-success {
+        opacity: 0;
+        transform: scale(0.55) rotate(-8deg);
+      }
+
+      &[data-state="success"] {
+        border-color: color-mix(in srgb, var(--ym-ok) 40%, transparent);
+        background: var(--ym-ok-soft);
+        color: var(--ym-ok);
+
+        .copy-icon-default {
+          opacity: 0;
+          transform: scale(0.68) rotate(10deg);
+        }
+
+        .copy-icon-success {
+          opacity: 1;
+          transform: scale(1) rotate(0deg);
+        }
+      }
+
+      &[data-state="error"] {
+        border-color: color-mix(in srgb, var(--ym-danger) 40%, transparent);
+        background: var(--ym-danger-soft);
+        color: var(--ym-danger);
+      }
+    }
+
+    &.styled > .yumeeditor-code-header .copy {
+      position: relative;
+      top: auto;
+      right: auto;
+      z-index: auto;
+      flex: 0 0 auto;
+    }
+  }
+
+  @include code-block-enhance;
+
+  @media (prefers-reduced-motion: reduce) {
+    pre .copy,
+    pre .copy .copy-icon,
+    pre .copy::after {
+      transition: none;
+    }
+  }
+}

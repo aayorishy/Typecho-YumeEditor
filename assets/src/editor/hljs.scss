@@ -1,0 +1,17 @@
+// ---------------------------------------------------------------------------
+// YumeEditor · Highlight.js bridge
+// ---------------------------------------------------------------------------
+// Loaded only when a Highlight.js theme is selected. It styles the plugin's
+// own code-block chrome on top of the theme's token colours.
+// ---------------------------------------------------------------------------
+
+@import "../tokens";
+@import "../code";
+
+.post-content,
+.prose,
+[itemprop="articleBody"],
+#wmd-preview-yumeeditor {
+  @include ym-theme;
+  @include code-block-styles;
+}

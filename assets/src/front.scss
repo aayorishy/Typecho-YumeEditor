@@ -1,0 +1,43 @@
+// ---------------------------------------------------------------------------
+// YumeEditor · complete front-end bundle
+// ---------------------------------------------------------------------------
+// Everything the plugin can render on the front end, in a single file. Handy
+// for themes that inline their CSS or for manual `<link>` tags.
+// ---------------------------------------------------------------------------
+
+@import "tokens";
+@import "document";
+@import "code";
+@import "editor/fence-blocks";
+@import "editor/fence-tabs";
+
+.post-content,
+.prose,
+[itemprop="articleBody"] {
+  @include ym-theme;
+  @include code-block-styles;
+
+  .fence {
+    @include fence-block-styles;
+  }
+
+  .fence-tabs {
+    @include fence-tabs-styles;
+  }
+
+  .fence-content.text-center {
+    text-align: center;
+  }
+
+  .fence p {
+    margin-top: 0;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+}
+
+:where(.post-content, .prose, [itemprop="articleBody"]) {
+  @include document-typography;
+}

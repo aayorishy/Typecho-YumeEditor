@@ -1,0 +1,179 @@
+// ---------------------------------------------------------------------------
+// YumeEditor · fenced tabs
+// ---------------------------------------------------------------------------
+// `::: tabs` / `::: tab 标题`. Two visual modes are supported out of the box:
+// the default underline nav and the `tab-box` pill rail.
+// ---------------------------------------------------------------------------
+
+@mixin fence-tabs-styles {
+  --fence-tabs-radius: var(--ym-radius-md);
+  --fence-tabs-accent: var(--ym-accent);
+  --fence-tabs-border: var(--ym-line);
+  --fence-tabs-panel-bg: var(--ym-surface-strong);
+  --fence-tabs-active-color: var(--ym-accent-deep);
+  --fence-tabs-inactive-color: var(--ym-muted);
+  padding: 0;
+  border: 0;
+  background: transparent;
+
+  .fence-tabs-nav {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.35rem;
+    margin: 0 0 0.75rem;
+    padding: 0 0 0.45rem;
+    border-bottom: 1px solid var(--fence-tabs-border);
+    color: var(--fence-tabs-inactive-color);
+    font-family: var(--ym-font-ui);
+    font-size: 0.9rem;
+    font-weight: 500;
+    line-height: 1.4;
+
+    &.tab-box {
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.3rem;
+      border: 1px solid var(--fence-tabs-border);
+      border-radius: 999px;
+      background: var(--ym-paper-deep);
+    }
+
+    &.tab-flat {
+      gap: 0;
+      padding-bottom: 0;
+      border-bottom: 0;
+    }
+  }
+
+  .fence-tabs-tab {
+    position: relative;
+    top: 0;
+    margin: 0;
+    padding: 0.5rem 0.95rem;
+    border: 1px solid transparent;
+    border-radius: var(--ym-radius-sm);
+    background: transparent;
+    color: var(--fence-tabs-inactive-color);
+    font: inherit;
+    font-weight: 500;
+    line-height: 1.4;
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+    appearance: none;
+    transition: color 0.18s var(--ym-ease), background-color 0.18s var(--ym-ease),
+      border-color 0.18s var(--ym-ease);
+
+    &:hover {
+      color: var(--ym-ink);
+      background: color-mix(in srgb, var(--ym-ink) 4%, transparent);
+    }
+
+    &:focus-visible {
+      @include ym-focus-ring;
+    }
+
+    &[aria-selected="true"],
+    &.tab-active {
+      color: var(--fence-tabs-active-color);
+      background: var(--ym-accent-soft);
+      border-color: color-mix(in srgb, var(--fence-tabs-accent) 26%, transparent);
+      font-weight: 600;
+    }
+
+    &[aria-selected="false"],
+    &.tab-inactive {
+      color: var(--fence-tabs-inactive-color);
+    }
+  }
+
+  .fence-tabs-nav.tab-box .fence-tabs-tab {
+    border-radius: 999px;
+
+    &[aria-selected="true"],
+    &.tab-active {
+      background: var(--ym-surface-strong);
+      border-color: var(--fence-tabs-border);
+      box-shadow: var(--ym-shadow-sm);
+    }
+  }
+
+  .fence-tabs-nav.tab-flat .fence-tabs-tab {
+    margin-bottom: -1px;
+    border-bottom-right-radius: 0;
+    border-bottom-left-radius: 0;
+
+    &[aria-selected="true"],
+    &.tab-active {
+      border-color: var(--fence-tabs-border);
+      border-bottom-color: var(--fence-tabs-panel-bg);
+      background: var(--fence-tabs-panel-bg);
+      box-shadow: none;
+    }
+  }
+
+  .fence-tabs-panels {
+    position: relative;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .fence-tabs-panel {
+    padding: 1rem 1.15rem;
+    border: 1px solid var(--fence-tabs-border);
+    border-radius: var(--fence-tabs-radius);
+    background: var(--fence-tabs-panel-bg);
+    box-shadow: none;
+
+    > :first-child {
+      margin-top: 0;
+    }
+
+    > :last-child {
+      margin-bottom: 0;
+    }
+
+    > br:last-child {
+      display: none;
+    }
+  }
+
+  .fence-tabs-panels.tab-panel-flat .fence-tabs-panel {
+    border-top-left-radius: 0;
+  }
+
+  .fence-tabs-panel.fence-tabs-panel-active,
+  .fence-tabs-panel.tab-panel-active {
+    animation: fence-tabs-slide-down 0.2s var(--ym-ease);
+  }
+
+  .fence-tabs-panel.fence-tabs-panel-no-animation {
+    animation: none;
+  }
+
+  .fence-tabs-panel[hidden] {
+    display: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fence-tabs-tab,
+    .fence-tabs-panel.fence-tabs-panel-active,
+    .fence-tabs-panel.tab-panel-active {
+      animation: none;
+      transition: none;
+    }
+  }
+}
+
+@keyframes fence-tabs-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-0.4rem);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

@@ -1,0 +1,28 @@
+// ---------------------------------------------------------------------------
+// YumeEditor · front-end fenced tabs
+// ---------------------------------------------------------------------------
+
+@import "tokens";
+@import "editor/fence-tabs";
+
+.post-content,
+.prose,
+[itemprop="articleBody"] {
+  @include ym-theme;
+
+  .fence-tabs {
+    @include fence-tabs-styles;
+  }
+
+  .fence p {
+    margin-top: 0;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  .fence-content.text-center {
+    text-align: center;
+  }
+}

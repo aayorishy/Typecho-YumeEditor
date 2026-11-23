@@ -1,0 +1,189 @@
+// ---------------------------------------------------------------------------
+// YumeEditor · code block decorations
+// ---------------------------------------------------------------------------
+// Line numbers, diff markers, focus/highlight ranges. Everything hangs off the
+// `.yumeeditor-code-line` spans produced by `utils/codeBlocks.js`.
+// ---------------------------------------------------------------------------
+
+@mixin code-block-enhance {
+  pre.yumeeditor-code-block {
+    --ym-code-line-gutter: 3.25rem;
+    --ym-code-line-padding-x: 1.1rem;
+    --ym-code-line-height: 1.65;
+    --ym-code-highlight-bg: color-mix(in srgb, var(--ym-accent) 12%, transparent);
+    --ym-code-focus-bg: color-mix(in srgb, var(--ym-accent) 20%, transparent);
+    --ym-code-add-bg: color-mix(in srgb, var(--ym-ok) 14%, transparent);
+    --ym-code-add-color: var(--ym-ok);
+    --ym-code-remove-bg: color-mix(in srgb, var(--ym-danger) 14%, transparent);
+    --ym-code-remove-color: var(--ym-danger);
+    --ym-code-warning-bg: color-mix(in srgb, var(--ym-warn) 16%, transparent);
+    --ym-code-warning-color: var(--ym-warn);
+    --ym-code-error-bg: color-mix(in srgb, var(--ym-danger) 18%, transparent);
+    --ym-code-error-color: var(--ym-danger);
+
+    line-height: var(--ym-code-line-height);
+
+    > .yumeeditor-code-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      min-height: 2.4rem;
+      padding: 0.55rem 0.85rem;
+      border-bottom: 1px solid var(--ym-code-line);
+      background: var(--ym-code-chip);
+    }
+
+    > .yumeeditor-code-header .yumeeditor-code-header-main {
+      display: flex;
+      flex: 1 1 auto;
+      align-items: center;
+      gap: 0.65rem;
+      min-width: 0;
+    }
+
+    > .yumeeditor-code-header .yumeeditor-code-header-actions {
+      display: inline-flex;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: flex-end;
+      margin-left: auto;
+    }
+
+    .yumeeditor-code-title {
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      color: var(--ym-code-ink);
+      font-family: var(--ym-font-ui);
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .yumeeditor-code-language {
+      display: inline-flex;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      padding: 0.18rem 0.5rem;
+      border-radius: 999px;
+      background: var(--ym-code-chip);
+      color: var(--ym-code-muted);
+      font-family: var(--ym-font-mono);
+      font-size: 0.62rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    > code {
+      line-height: var(--ym-code-line-height);
+      padding-top: 1rem;
+    }
+
+    > code .yumeeditor-code-line {
+      position: relative;
+      display: block;
+      min-height: calc(1em * var(--ym-code-line-height));
+      padding-inline: var(--ym-code-line-padding-x);
+      line-height: var(--ym-code-line-height);
+    }
+
+    > code .yumeeditor-code-line > .line {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 0;
+      height: 0;
+      overflow: hidden;
+      opacity: 0;
+      pointer-events: none;
+      line-height: 0;
+    }
+
+    &.has-line-numbers > code .yumeeditor-code-line {
+      padding-left: calc(var(--ym-code-line-padding-x) + var(--ym-code-line-gutter));
+    }
+
+    &.has-line-numbers > code .yumeeditor-code-line::before {
+      content: attr(data-line-number);
+      position: absolute;
+      top: 0;
+      left: 0.55rem;
+      width: calc(var(--ym-code-line-gutter) - 1rem);
+      color: var(--ym-code-muted);
+      font-variant-numeric: tabular-nums;
+      line-height: var(--ym-code-line-height);
+      text-align: right;
+      user-select: none;
+      opacity: 0.7;
+    }
+
+    > code .yumeeditor-code-line[data-diff-marker]::after {
+      content: attr(data-diff-marker);
+      position: absolute;
+      top: 0;
+      left: 0.35rem;
+      width: 0.75rem;
+      font-weight: 700;
+      line-height: var(--ym-code-line-height);
+      text-align: center;
+      user-select: none;
+    }
+
+    > code .yumeeditor-code-line.is-highlighted {
+      background: var(--ym-code-highlight-bg);
+      box-shadow: inset 2px 0 0 var(--ym-accent);
+    }
+
+    > code .yumeeditor-code-line.is-focused {
+      background: var(--ym-code-focus-bg);
+      box-shadow: inset 2px 0 0 var(--ym-accent-deep);
+    }
+
+    &.has-focused-lines > code .yumeeditor-code-line.is-muted {
+      opacity: 0.45;
+      filter: saturate(0.7);
+    }
+
+    > code .yumeeditor-code-line.is-diff-plus {
+      background: var(--ym-code-add-bg);
+      box-shadow: inset 3px 0 0 var(--ym-ok);
+    }
+
+    > code .yumeeditor-code-line.is-diff-plus::after {
+      color: var(--ym-code-add-color);
+    }
+
+    > code .yumeeditor-code-line.is-diff-minus {
+      background: var(--ym-code-remove-bg);
+      box-shadow: inset 3px 0 0 var(--ym-danger);
+    }
+
+    > code .yumeeditor-code-line.is-diff-minus::after {
+      color: var(--ym-code-remove-color);
+    }
+
+    > code .yumeeditor-code-line.is-warning {
+      background: var(--ym-code-warning-bg);
+      box-shadow: inset 3px 0 0 var(--ym-warn);
+    }
+
+    > code .yumeeditor-code-line.is-warning::after {
+      content: "!";
+      color: var(--ym-code-warning-color);
+    }
+
+    > code .yumeeditor-code-line.is-error {
+      background: var(--ym-code-error-bg);
+      box-shadow: inset 3px 0 0 var(--ym-danger);
+    }
+
+    > code .yumeeditor-code-line.is-error::after {
+      content: "!";
+      color: var(--ym-code-error-color);
+    }
+  }
+}

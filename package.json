@@ -1,0 +1,75 @@
+{
+  "name": "yumeeditor",
+  "version": "1.0.0",
+  "description": "A quiet Markdown editor for Typecho, built for the Yume theme and the MoePanel admin design.",
+  "main": "assets/src/main.js",
+  "private": true,
+  "license": "Apache-2.0",
+  "author": "aayorishy",
+  "homepage": "https://github.com/aayorishy/Typecho-YumeEditor#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aayorishy/Typecho-YumeEditor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/aayorishy/Typecho-YumeEditor/issues"
+  },
+  "keywords": [
+    "typecho",
+    "typecho-plugin",
+    "markdown",
+    "editor",
+    "mermaid",
+    "mathjax",
+    "yume",
+    "moepanel"
+  ],
+  "scripts": {
+    "dev": "mix",
+    "watch": "mix watch",
+    "watch-poll": "mix watch -- --watch-options-poll=1000",
+    "build": "mix --production",
+    "test": "node tests/run.js"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.3.1",
+    "babel-loader": "^8.2.2",
+    "browser-sync": "^3.0.3",
+    "browser-sync-webpack-plugin": "^2.4.0",
+    "clean-webpack-plugin": "^4.0.0",
+    "css-loader": "^5.2.6",
+    "css-select": "^7.0.0",
+    "domutils": "^4.0.2",
+    "expose-loader": "^3.0.0",
+    "file-loader": "^6.2.0",
+    "highlight.js": "^11.10.0",
+    "htmlparser2": "^12.0.0",
+    "jsdom": "^31.0.1",
+    "laravel-mix": "^6.0.27",
+    "laravel-mix-clean": "^0.1.0",
+    "laravel-mix-obfuscator": "^1.0.0",
+    "marked": "^4.0.12",
+    "postcss": "^8.3.6",
+    "postcss-loader": "^6.1.1",
+    "postcss-preset-env": "^7.2.3",
+    "resolve-url-loader": "^5.0.0",
+    "sass": "^1.35.1",
+    "sass-loader": "^12.1.0",
+    "url-loader": "^4.1.1",
+    "webpack": "^5.40.0",
+    "webpack-cli": "^4.7.2",
+    "webpack-merge": "^5.8.0",
+    "webpack-obfuscator": "^3.5.1"
+  },
+  "dependencies": {
+    "browserify-fs": "^1.0.0",
+    "cross-env": "^7.0.3",
+    "crypto-browserify": "^3.12.0",
+    "jquery": "^3.6.0",
+    "mermaid": "11.14.0",
+    "os-browserify": "^0.3.0",
+    "path-browserify": "^1.0.1",
+    "stream-browserify": "^3.0.0",
+    "stream-http": "^3.2.0"
+  }
+}

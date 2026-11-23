@@ -1,0 +1,35 @@
+// ---------------------------------------------------------------------------
+// YumeEditor · legacy single-file content bundle
+// ---------------------------------------------------------------------------
+// Themes that prefer one request can load `content.css` instead of the split
+// `front-content.css` / `front-fence.css` / `front-tabs.css` trio.
+// ---------------------------------------------------------------------------
+
+@import "tokens";
+@import "document";
+@import "code";
+@import "editor/fence-blocks";
+@import "editor/fence-tabs";
+
+.post-content,
+.prose,
+[itemprop="articleBody"] {
+  @include ym-theme;
+  @include code-block-styles;
+
+  .fence {
+    @include fence-block-styles;
+  }
+
+  .fence-tabs {
+    @include fence-tabs-styles;
+  }
+
+  .fence-content.text-center {
+    text-align: center;
+  }
+}
+
+:where(.post-content, .prose, [itemprop="articleBody"]) {
+  @include document-typography;
+}

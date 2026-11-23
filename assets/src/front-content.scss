@@ -1,0 +1,22 @@
+// ---------------------------------------------------------------------------
+// YumeEditor · front-end content typography
+// ---------------------------------------------------------------------------
+// Loaded from the archive footer. Generic typography lives inside `:where()`,
+// so it never outranks a theme's own `.prose` rules — Yume keeps its voice.
+// Component styles (code blocks) keep normal specificity so they always apply.
+// ---------------------------------------------------------------------------
+
+@import "tokens";
+@import "document";
+@import "code";
+
+.post-content,
+.prose,
+[itemprop="articleBody"] {
+  @include ym-theme;
+  @include code-block-styles;
+}
+
+:where(.post-content, .prose, [itemprop="articleBody"]) {
+  @include document-typography;
+}

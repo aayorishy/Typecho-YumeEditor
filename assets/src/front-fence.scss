@@ -1,0 +1,32 @@
+// ---------------------------------------------------------------------------
+// YumeEditor · front-end fence containers
+// ---------------------------------------------------------------------------
+
+@import "tokens";
+@import "editor/fence-blocks";
+
+.post-content,
+.prose,
+[itemprop="articleBody"] {
+  @include ym-theme;
+
+  .fence {
+    @include fence-block-styles;
+  }
+
+  .fence p {
+    margin-top: 0;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  .fence-content:empty {
+    display: none;
+  }
+
+  .fence-content.text-center {
+    text-align: center;
+  }
+}

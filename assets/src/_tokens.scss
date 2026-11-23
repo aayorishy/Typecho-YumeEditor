@@ -1,0 +1,155 @@
+// ---------------------------------------------------------------------------
+// YumeEditor · design tokens
+// ---------------------------------------------------------------------------
+// The whole plugin borrows MoePanel's admin design system: warm paper canvas,
+// coral accent, acid-lime highlight, serif display type and oversized radii.
+//
+// Every token points at the host design system first (`--paper`, `--ink`,
+// `--accent`, …). That means:
+//   · inside the admin, MoePanel's palette (and the user's accent colour) wins;
+//   · on the front end, Yume's `--ink / --surface / --line / --violet` win;
+//   · with neither present, the bundled MoePanel-equivalent values apply.
+// ---------------------------------------------------------------------------
+
+@mixin ym-tokens {
+  --ym-paper: var(--paper, var(--bg, #f3f0e8));
+  --ym-paper-deep: var(--paper-deep, #ebe6da);
+  --ym-surface: var(--surface, #fbfaf6);
+  --ym-surface-strong: var(--surface-strong, #fff);
+  --ym-input-bg: var(--input-bg, #fff);
+
+  --ym-ink: var(--ink, #171613);
+  --ym-ink-2: var(--ink-2, #24221d);
+  --ym-muted: var(--muted, #7d776b);
+  --ym-muted-2: var(--muted-2, var(--faint, #a29b8d));
+
+  --ym-line: var(--line, rgba(23, 22, 19, 0.12));
+  --ym-line-strong: var(--line-strong, var(--line-2, rgba(23, 22, 19, 0.22)));
+  --ym-line-soft: var(--line-soft, rgba(23, 22, 19, 0.07));
+
+  --ym-accent: var(--accent, var(--violet, #ff4d1f));
+  --ym-accent-deep: var(--accent-deep, var(--violet, #df3c12));
+  --ym-accent-soft: var(--accent-soft, #ffe4da);
+  --ym-accent-soft: color-mix(in srgb, var(--ym-accent) 13%, transparent);
+  --ym-acid: var(--acid, var(--yellow, #d9fb67));
+
+  --ym-ok: var(--ok, var(--mint, #287a4c));
+  --ym-ok-soft: var(--ok-soft, #e2f2e8);
+  --ym-ok-soft: color-mix(in srgb, var(--ym-ok) 14%, transparent);
+  --ym-warn: var(--warn, var(--orange, #a05a00));
+  --ym-warn-soft: var(--warn-soft, #fff0d8);
+  --ym-warn-soft: color-mix(in srgb, var(--ym-warn) 16%, transparent);
+  --ym-danger: var(--danger, var(--pink, #a82f18));
+  --ym-danger-soft: var(--danger-soft, #fde5df);
+  --ym-danger-soft: color-mix(in srgb, var(--ym-danger) 14%, transparent);
+
+  --ym-radius-xl: var(--radius-xl, 26px);
+  --ym-radius-lg: var(--radius-lg, 20px);
+  --ym-radius-md: var(--radius-md, 14px);
+  --ym-radius-sm: var(--radius-sm, 10px);
+
+  --ym-shadow-sm: var(--shadow-sm, 0 1px 2px rgba(23, 22, 19, 0.04), 0 6px 18px rgba(23, 22, 19, 0.035));
+  --ym-shadow-md: var(--shadow-md, 0 2px 4px rgba(23, 22, 19, 0.04), 0 18px 44px rgba(23, 22, 19, 0.07));
+
+  --ym-font-ui: var(--font-ui, "Inter", "Helvetica Neue", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif);
+  --ym-font-display: var(--font-display, "Iowan Old Style", "Palatino Linotype", "Noto Serif SC", "Songti SC", Georgia, serif);
+  --ym-font-mono: var(--font-mono, "SFMono-Regular", "Cascadia Code", Menlo, Monaco, Consolas, "Courier New", monospace);
+  --ym-ease: var(--ease, cubic-bezier(0.22, 1, 0.36, 1));
+
+  // Code / surface colours are not part of MoePanel's public palette, so they
+  // are derived locally but keep the same warm paper mood.
+  --ym-code-bg: #f6f4ee;
+  --ym-code-ink: #24221d;
+  --ym-code-muted: #8b8578;
+  --ym-code-line: rgba(23, 22, 19, 0.1);
+  --ym-code-chip: rgba(23, 22, 19, 0.055);
+
+  color-scheme: light;
+}
+
+@mixin ym-dark-tokens {
+  --ym-paper: var(--paper, var(--bg, #0e0f0c));
+  --ym-paper-deep: var(--paper-deep, #171812);
+  --ym-surface: var(--surface, #151611);
+  --ym-surface-strong: var(--surface-strong, #1b1c16);
+  --ym-input-bg: var(--input-bg, #1c1d17);
+
+  --ym-ink: var(--ink, #f4f0e4);
+  --ym-ink-2: var(--ink-2, #d8d3c6);
+  --ym-muted: var(--muted, #9d9789);
+  --ym-muted-2: var(--muted-2, var(--faint, #6d685d));
+
+  --ym-line: var(--line, rgba(244, 240, 228, 0.14));
+  --ym-line-strong: var(--line-strong, var(--line-2, rgba(244, 240, 228, 0.26)));
+  --ym-line-soft: var(--line-soft, rgba(244, 240, 228, 0.08));
+
+  --ym-code-bg: #12130f;
+  --ym-code-ink: #f4f0e4;
+  --ym-code-muted: #948e80;
+  --ym-code-line: rgba(244, 240, 228, 0.12);
+  --ym-code-chip: rgba(244, 240, 228, 0.07);
+
+  color-scheme: dark;
+}
+
+/// Emits both palettes: light first, then every dark-mode switch the host may
+/// use (MoePanel sets `data-studio-theme`, Yume sets `data-theme`, and we fall
+/// back to the OS preference when neither attribute exists).
+@mixin ym-theme {
+  @include ym-tokens;
+
+  html[data-studio-theme="dark"] & {
+    @include ym-dark-tokens;
+  }
+
+  :root[data-theme="dark"] & {
+    @include ym-dark-tokens;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme]):not([data-studio-theme]) & {
+      @include ym-dark-tokens;
+    }
+  }
+}
+
+@mixin ym-focus-ring($color: var(--ym-accent)) {
+  outline: 2px solid $color;
+  outline-offset: 2px;
+}
+
+@mixin ym-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ym-line-strong) transparent;
+
+  &::-webkit-scrollbar {
+    width: 0.5rem;
+    height: 0.5rem;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background-color: var(--ym-line-strong);
+    background-clip: padding-box;
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background-color: var(--ym-muted);
+  }
+}
+
+@mixin ym-kicker {
+  margin: 0;
+  color: var(--ym-muted);
+  font-family: var(--ym-font-mono);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}

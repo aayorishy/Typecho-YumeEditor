@@ -1,0 +1,1528 @@
+import {
+    $C,
+    escapeAttribute,
+    escapeHtml,
+    isElement,
+    isObject,
+    isString,
+    sprintf,
+} from "./utils/functions";
+import {initFenceTabs} from "./utils/tabs";
+import {initFenceGrid, initFenceMasonry} from "./utils/fenceGallery";
+import TextAreaUtils from "./utils/textarea";
+import "./vendor/masonry.pkgd.min.js";
+
+class YumeEditor {
+    constructor(sel, sel_preview) {
+        this.previewSelector = sel_preview;
+        if (document.querySelector(sel)) {
+            this.textarea = new TextAreaUtils(sel);
+            this.previewArea = null;
+            this.previewWrapper = null;
+        } else {
+            console.warn(sprintf("[YumeEditor] editor element [%s] not found", sel));
+        }
+
+        this.isInit = false;
+        this.buttons = [];
+        this.insertProcessors = [];
+        this.scrollSyncFrame = 0;
+        this.scrollSyncLock = false;
+        this.scrollSyncBound = false;
+        this.previewSettleFrame = 0;
+        this.pendingPreviewScrollTop = null;
+        this.previewLineAnchors = [];
+        this.pendingPreviewSyncTimers = [];
+        this.previewPrefersRatioSync = false;
+        $("body")
+            .on("YumeEditorAddButton", (event, ...buttons) => {
+                buttons.forEach((button) => {
+                    if (isObject(button)) {
+                        if (Object.keys(button).length) {
+                            this.buttons.push(button);
+                        } else {
+                            this.buttons.push({
+                                class: "wmd-spacer",
+                            });
+                        }
+                    } else if (isString(button) && button === "splitter") {
+                        this.buttons.push({
+                            class: "wmd-spacer",
+                        });
+                    }
+                });
+            })
+            .on("YumeEditorInit", () => {
+                this.init();
+            })
+            .on("YumeEditorRefresh", () => {
+                let sp = this.textarea.getScrollPosition();
+                this.setContent(this.getContent());
+                this.textarea.setScrollPosition(sp.top, sp.left);
+            })
+            .on("YumeEditorAddInsertProcessor", (event, ...processors) => {
+                processors.forEach((processor) => {
+                    if (typeof processor === "function") {
+                        this.insertProcessors.push(processor);
+                    }
+                });
+            });
+    }
+
+    refreshPreviewElements() {
+        this.previewArea = document.querySelector(this.previewSelector);
+        this.previewWrapper =
+            this.previewArea?.closest("#wmd-preview-wrapper-yumeeditor") || null;
+    }
+
+    /**
+     * 判断是不是 Markdown 模式
+     *
+     * @returns {boolean}
+     */
+    isMarkdown() {
+        return $('[name="markdown"]').val() === "1";
+    }
+
+    init() {
+        if (this.isInit) return;
+        this.isInit = true;
+        this.refreshPreviewElements();
+        window.YumeEditor = this;
+        $("body")
+            .append(`<div id="ym-wrapper"></div>`)
+            .on("YumeEditorPreviewEnd", () => this.handlePreviewEnd())
+            .on("YumeEditorReplaceSelection", (e, text) => {
+                this.replaceSelection(text);
+            });
+        this.initToolbar();
+        this.initScrollSync();
+        $("body").trigger("YumeEditorPreviewEnd");
+    }
+
+    initScrollSync() {
+        if (this.scrollSyncBound || !this.previewArea || !this.previewWrapper) {
+            return;
+        }
+        this.scrollSyncBound = true;
+        const textareaElement = this.textarea.getInstance();
+
+        textareaElement.addEventListener("scroll", () => {
+            this.schedulePreviewScrollSync();
+        });
+        window.addEventListener("scroll", () => {
+            this.schedulePreviewScrollSync();
+        });
+        window.addEventListener("resize", () => {
+            this.schedulePreviewScrollSync(true);
+        });
+    }
+
+    clearPendingPreviewSyncTimers() {
+        this.pendingPreviewSyncTimers.forEach((timerId) => {
+            window.clearTimeout(timerId);
+        });
+        this.pendingPreviewSyncTimers = [];
+    }
+
+    stopPreviewSettle(clearPendingTarget = true) {
+        if (this.previewSettleFrame) {
+            window.cancelAnimationFrame(this.previewSettleFrame);
+            this.previewSettleFrame = 0;
+        }
+        if (clearPendingTarget) {
+            this.pendingPreviewScrollTop = null;
+        }
+    }
+
+    schedulePreviewSettle() {
+        if (this.previewSettleFrame || this.pendingPreviewScrollTop === null) {
+            return;
+        }
+        this.previewSettleFrame = window.requestAnimationFrame(() => {
+            this.previewSettleFrame = 0;
+            if (this.pendingPreviewScrollTop === null) {
+                return;
+            }
+            this.setPreviewScrollTop(this.pendingPreviewScrollTop, {smooth: true});
+        });
+    }
+
+    schedulePreviewScrollSync(force = false) {
+        if (!this.previewArea || !this.previewWrapper) {
+            return;
+        }
+        if (this.scrollSyncFrame) {
+            window.cancelAnimationFrame(this.scrollSyncFrame);
+        }
+        this.scrollSyncFrame = window.requestAnimationFrame(() => {
+            this.scrollSyncFrame = 0;
+            this.syncPreviewScroll(force);
+        });
+    }
+
+    rebuildPreviewLineAnchors() {
+        if (!this.previewArea) {
+            this.previewLineAnchors = [];
+            return;
+        }
+        this.previewLineAnchors = Array.from(
+            this.previewArea.querySelectorAll(".line[data-start][data-end]")
+        )
+            .map((element) => {
+                const start = Number.parseInt(
+                    element.getAttribute("data-start") || "",
+                    10
+                );
+                const end = Number.parseInt(
+                    element.getAttribute("data-end") || "",
+                    10
+                );
+                if (Number.isNaN(start) || Number.isNaN(end)) {
+                    return null;
+                }
+                return {
+                    element,
+                    start,
+                    end,
+                };
+            })
+            .filter(Boolean);
+    }
+
+    isPreviewVisible() {
+        if (!this.previewArea || !this.previewWrapper) {
+            return false;
+        }
+        const style = window.getComputedStyle(this.previewWrapper);
+        return style.display !== "none" && style.visibility !== "hidden";
+    }
+
+    getTextareaLineHeight() {
+        const textareaElement = this.textarea.getInstance();
+        const style = window.getComputedStyle(textareaElement);
+        let lineHeight = Number.parseFloat(style.lineHeight);
+        if (Number.isNaN(lineHeight)) {
+            const fontSize = Number.parseFloat(style.fontSize) || 16;
+            lineHeight = fontSize * 1.5;
+        }
+        return lineHeight > 0 ? lineHeight : 24;
+    }
+
+    getPreviewScrollContainer() {
+        if (!this.previewWrapper && !this.previewArea) {
+            return null;
+        }
+        const candidates = [this.previewWrapper, this.previewArea].filter(Boolean);
+        let selected = candidates[0] || null;
+        let maxScrollableHeight = -1;
+
+        candidates.forEach((element) => {
+            const scrollableHeight = element.scrollHeight - element.clientHeight;
+            if (scrollableHeight > maxScrollableHeight) {
+                maxScrollableHeight = scrollableHeight;
+                selected = element;
+            }
+        });
+
+        return selected;
+    }
+
+    getSourceScrollState() {
+        const textareaElement = this.textarea.getInstance();
+        const innerScrollMax = Math.max(
+            textareaElement.scrollHeight - textareaElement.clientHeight,
+            0
+        );
+        if (innerScrollMax > 0) {
+            return {
+                top: textareaElement.scrollTop,
+                max: innerScrollMax,
+            };
+        }
+
+        const rect = textareaElement.getBoundingClientRect();
+        const docTop = window.scrollY + rect.top;
+        const pageScrollTop = Math.max(window.scrollY - docTop, 0);
+        const pageScrollMax = Math.max(
+            textareaElement.offsetHeight - window.innerHeight,
+            0
+        );
+
+        return {
+            top: Math.min(pageScrollTop, pageScrollMax),
+            max: pageScrollMax,
+        };
+    }
+
+    getSourceLineState() {
+        const sourceScrollState = this.getSourceScrollState();
+        const lineHeight = this.getTextareaLineHeight();
+        const rawLine = sourceScrollState.top / lineHeight;
+        const lineNumber = Math.max(0, Math.floor(rawLine));
+        return {
+            lineHeight,
+            lineNumber,
+            lineOffset: sourceScrollState.top - lineNumber * lineHeight,
+            sourceScrollTop: sourceScrollState.top,
+            sourceMaxScroll: sourceScrollState.max,
+        };
+    }
+
+    getPreviewContainerOffsetTop(anchorElement, scrollContainer) {
+        if (!anchorElement || !scrollContainer) {
+            return 0;
+        }
+        const anchorRect = anchorElement.getBoundingClientRect();
+        const containerRect = scrollContainer.getBoundingClientRect();
+        return anchorRect.top - containerRect.top + scrollContainer.scrollTop;
+    }
+
+    getPreviewScrollableHeight() {
+        const scrollContainer = this.getPreviewScrollContainer();
+        if (!scrollContainer) {
+            return 0;
+        }
+        return Math.max(scrollContainer.scrollHeight - scrollContainer.clientHeight, 0);
+    }
+
+    getRatioPreviewScrollTop(sourceScrollTop, sourceMaxScroll, targetMaxScroll) {
+        if (targetMaxScroll <= 0 || sourceMaxScroll <= 0) {
+            return 0;
+        }
+        return targetMaxScroll * (sourceScrollTop / sourceMaxScroll);
+    }
+
+    shouldPreferRatioPreviewSync() {
+        if (!this.previewArea) {
+            return false;
+        }
+
+        // Complex fence containers can hide or reshape large source ranges,
+        // which makes anchor interpolation jump backwards in the preview.
+        return this.previewArea.querySelector(
+            ".fence, .fence-tabs, .fence-tabs-panel, .fence-details, details"
+        ) !== null;
+    }
+
+    isPreviewAnchorVisible(anchorElement) {
+        if (!(anchorElement instanceof Element)) {
+            return false;
+        }
+
+        const closedDetails = anchorElement.closest("details:not([open])");
+        if (closedDetails) {
+            const summary = closedDetails.querySelector("summary");
+            if (!summary || !summary.contains(anchorElement)) {
+                return false;
+            }
+        }
+
+        let current = anchorElement;
+        while (current instanceof Element) {
+            if (current.hidden || current.getAttribute("aria-hidden") === "true") {
+                return false;
+            }
+
+            const style = window.getComputedStyle(current);
+            if (
+                style.display === "none" ||
+                style.visibility === "hidden" ||
+                style.visibility === "collapse" ||
+                style.contentVisibility === "hidden"
+            ) {
+                return false;
+            }
+
+            if (current === this.previewArea) {
+                break;
+            }
+            current = current.parentElement;
+        }
+
+        const rects = anchorElement.getClientRects();
+        if (!rects.length) {
+            return false;
+        }
+
+        return Array.from(rects).some((rect) => rect.height > 0 || rect.width > 0);
+    }
+
+    getPreviewAnchorMetrics(scrollContainer, fallbackHeight) {
+        return this.previewLineAnchors
+            .filter((anchor) => this.isPreviewAnchorVisible(anchor.element))
+            .map((anchor) => {
+                const height =
+                    anchor.element.offsetHeight ||
+                    Number.parseFloat(window.getComputedStyle(anchor.element).height) ||
+                    fallbackHeight;
+                const top = this.getPreviewContainerOffsetTop(
+                    anchor.element,
+                    scrollContainer
+                );
+                if (!Number.isFinite(top) || !Number.isFinite(height)) {
+                    return null;
+                }
+                return {
+                    ...anchor,
+                    height,
+                    top,
+                    bottom: top + height,
+                    span: Math.max(anchor.end - anchor.start, 0),
+                };
+            })
+            .filter(Boolean);
+    }
+
+    arePreviewAnchorMetricsStable(anchorMetrics) {
+        if (!anchorMetrics.length) {
+            return false;
+        }
+
+        let lastTop = -Infinity;
+        for (const anchor of anchorMetrics) {
+            if (!Number.isFinite(anchor.top) || anchor.top + 1 < lastTop) {
+                return false;
+            }
+            lastTop = anchor.top;
+        }
+
+        return true;
+    }
+
+    getAnchorTargetScrollTop(sourceLineState, anchors, targetMaxScroll) {
+        if (!anchors.length) {
+            return null;
+        }
+
+        const {
+            lineHeight,
+            lineNumber,
+            lineOffset,
+            sourceScrollTop,
+            sourceMaxScroll,
+        } = sourceLineState;
+        const lineProgress = lineHeight > 0 ? lineOffset / lineHeight : 0;
+
+        for (let index = 0; index < anchors.length; index += 1) {
+            const anchor = anchors[index];
+            const nextAnchor = anchors[index + 1] || null;
+
+            if (lineNumber >= anchor.start && lineNumber <= anchor.end) {
+                const anchorRatio = anchor.span > 0
+                    ? (lineNumber - anchor.start + lineProgress) / (anchor.span + 1)
+                    : lineProgress;
+                return {
+                    targetScrollTop: anchor.top + anchor.height * anchorRatio,
+                    mode: "range",
+                    span: anchor.span,
+                    height: anchor.height,
+                };
+            }
+
+            if (
+                nextAnchor &&
+                lineNumber > anchor.end &&
+                lineNumber < nextAnchor.start
+            ) {
+                const gapSpan = Math.max(nextAnchor.start - anchor.end, 1);
+                const gapRatio = (lineNumber - anchor.end + lineProgress) / gapSpan;
+                return {
+                    targetScrollTop:
+                        anchor.bottom + (nextAnchor.top - anchor.bottom) * gapRatio,
+                    mode: "gap",
+                    span: gapSpan,
+                    height: Math.max(nextAnchor.top - anchor.bottom, lineHeight),
+                };
+            }
+        }
+
+        const lastAnchor = anchors[anchors.length - 1];
+        if (lineNumber >= lastAnchor.end) {
+            const remainingSourceScroll = Math.max(
+                lineHeight,
+                sourceMaxScroll - sourceScrollTop
+            );
+            const trailingRatio = Math.min(
+                1,
+                Math.max(
+                    0,
+                    ((lineNumber - lastAnchor.end) * lineHeight + lineOffset) /
+                        remainingSourceScroll
+                )
+            );
+            return {
+                targetScrollTop:
+                    lastAnchor.bottom +
+                    (targetMaxScroll - lastAnchor.bottom) * trailingRatio,
+                mode: "tail",
+                span: 0,
+                height: lastAnchor.height,
+            };
+        }
+
+        return null;
+    }
+
+    getAnchorWeight(anchorTarget, sourceLineState) {
+        if (!anchorTarget) {
+            return 0;
+        }
+
+        if (anchorTarget.mode === "gap") {
+            if (anchorTarget.span >= 24) {
+                return 0.08;
+            }
+            if (anchorTarget.span >= 12) {
+                return 0.16;
+            }
+            return 0.3;
+        }
+        if (anchorTarget.mode === "tail") {
+            return 0.25;
+        }
+
+        const normalizedHeight =
+            anchorTarget.height /
+            Math.max(
+                (anchorTarget.span + 1) * sourceLineState.lineHeight,
+                sourceLineState.lineHeight
+            );
+        const oversizePenalty = Math.min(
+            0.75,
+            Math.max(0, normalizedHeight - 1.5) / 4
+        );
+
+        return Math.max(0.25, 1 - oversizePenalty);
+    }
+
+    findAnchorForLine(lineNumber) {
+        if (!this.previewLineAnchors.length) {
+            return null;
+        }
+
+        let nearest = this.previewLineAnchors[0];
+        for (const anchor of this.previewLineAnchors) {
+            if (lineNumber >= anchor.start && lineNumber <= anchor.end) {
+                return anchor;
+            }
+            if (anchor.start > lineNumber) {
+                return nearest;
+            }
+            nearest = anchor;
+        }
+
+        return nearest;
+    }
+
+    setPreviewScrollTop(scrollTop, options = {}) {
+        const scrollContainer = this.getPreviewScrollContainer();
+        if (!scrollContainer) {
+            return;
+        }
+        const {smooth = true} = options;
+        const maxScrollTop = this.getPreviewScrollableHeight();
+        const targetScrollTop = Math.max(0, Math.min(scrollTop, maxScrollTop));
+        const currentScrollTop = scrollContainer.scrollTop;
+        let nextScrollTop = targetScrollTop;
+
+        if (smooth) {
+            const delta = targetScrollTop - currentScrollTop;
+            const deadZone = 6;
+
+            if (Math.abs(delta) <= deadZone) {
+                this.stopPreviewSettle();
+            } else {
+                const baseStep = Math.max(48, scrollContainer.clientHeight * 0.14);
+                const easedStep = Math.abs(delta) * 0.35;
+                const step = Math.min(
+                    Math.abs(delta),
+                    Math.max(baseStep, easedStep)
+                );
+                nextScrollTop = currentScrollTop + Math.sign(delta) * step;
+
+                if (Math.abs(targetScrollTop - nextScrollTop) <= deadZone) {
+                    nextScrollTop = targetScrollTop;
+                }
+
+                if (nextScrollTop !== targetScrollTop) {
+                    this.pendingPreviewScrollTop = targetScrollTop;
+                    this.schedulePreviewSettle();
+                } else {
+                    this.stopPreviewSettle();
+                }
+            }
+        } else {
+            this.stopPreviewSettle();
+        }
+
+        this.scrollSyncLock = true;
+        scrollContainer.scrollTop = nextScrollTop;
+        if (this.previewWrapper && this.previewWrapper !== scrollContainer) {
+            this.previewWrapper.scrollTop = nextScrollTop;
+        }
+        if (this.previewArea && this.previewArea !== scrollContainer) {
+            this.previewArea.scrollTop = nextScrollTop;
+        }
+        window.requestAnimationFrame(() => {
+            this.scrollSyncLock = false;
+        });
+    }
+
+    syncPreviewByRatio() {
+        const sourceScrollState = this.getSourceScrollState();
+        const targetMaxScroll = this.getPreviewScrollableHeight();
+        if (targetMaxScroll <= 0) {
+            this.setPreviewScrollTop(0, {smooth: false});
+            return;
+        }
+        this.setPreviewScrollTop(
+            this.getRatioPreviewScrollTop(
+                sourceScrollState.top,
+                sourceScrollState.max,
+                targetMaxScroll
+            ),
+            {smooth: false}
+        );
+    }
+
+    syncPreviewScroll(force = false) {
+        if (
+            !this.previewArea ||
+            !this.previewWrapper ||
+            !this.isPreviewVisible() ||
+            this.scrollSyncLock
+        ) {
+            return;
+        }
+
+        const scrollContainer = this.getPreviewScrollContainer();
+        if (!scrollContainer) {
+            return;
+        }
+
+        const textareaElement = this.textarea.getInstance();
+        const sourceLineState = this.getSourceLineState();
+        const targetMaxScroll = this.getPreviewScrollableHeight();
+
+        if (targetMaxScroll <= 0) {
+            this.setPreviewScrollTop(0, {smooth: false});
+            return;
+        }
+
+        if (sourceLineState.sourceScrollTop <= 1) {
+            this.setPreviewScrollTop(0, {smooth: false});
+            return;
+        }
+
+        if (
+            sourceLineState.sourceMaxScroll > 0 &&
+            sourceLineState.sourceScrollTop >= sourceLineState.sourceMaxScroll - 1
+        ) {
+            this.setPreviewScrollTop(targetMaxScroll, {smooth: false});
+            return;
+        }
+
+        if (!this.previewLineAnchors.length || force) {
+            this.rebuildPreviewLineAnchors();
+        }
+
+        const ratioTargetScrollTop = this.getRatioPreviewScrollTop(
+            sourceLineState.sourceScrollTop,
+            sourceLineState.sourceMaxScroll,
+            targetMaxScroll
+        );
+        const distanceToBottom = Math.max(
+            0,
+            sourceLineState.sourceMaxScroll - sourceLineState.sourceScrollTop
+        );
+        const bottomSnapThreshold = Math.max(
+            sourceLineState.lineHeight * 2,
+            32
+        );
+
+        if (distanceToBottom <= bottomSnapThreshold) {
+            this.setPreviewScrollTop(targetMaxScroll, {smooth: false});
+            return;
+        }
+
+        if (this.previewPrefersRatioSync) {
+            this.setPreviewScrollTop(ratioTargetScrollTop, {smooth: false});
+            return;
+        }
+
+        const anchorMetrics = this.getPreviewAnchorMetrics(
+            scrollContainer,
+            sourceLineState.lineHeight
+        );
+        const shouldUseRatioOnly =
+            anchorMetrics.length !== this.previewLineAnchors.length ||
+            !this.arePreviewAnchorMetricsStable(anchorMetrics);
+
+        if (shouldUseRatioOnly) {
+            this.setPreviewScrollTop(ratioTargetScrollTop, {smooth: false});
+            return;
+        }
+
+        const anchorTarget = this.getAnchorTargetScrollTop(
+            sourceLineState,
+            anchorMetrics,
+            targetMaxScroll
+        );
+
+        let targetScrollTop = ratioTargetScrollTop;
+        if (anchorTarget && Number.isFinite(anchorTarget.targetScrollTop)) {
+            const anchorWeight = this.getAnchorWeight(anchorTarget, sourceLineState);
+            targetScrollTop =
+                ratioTargetScrollTop * (1 - anchorWeight) +
+                anchorTarget.targetScrollTop * anchorWeight;
+        }
+
+        const blendRange = Math.max(
+            80,
+            Math.min(textareaElement.clientHeight * 0.8, 240)
+        );
+        const distanceToTop = sourceLineState.sourceScrollTop;
+
+        if (distanceToTop < blendRange) {
+            const weight = distanceToTop / blendRange;
+            targetScrollTop =
+                ratioTargetScrollTop * (1 - weight) + targetScrollTop * weight;
+        } else if (distanceToBottom < blendRange) {
+            const weight = distanceToBottom / blendRange;
+            targetScrollTop =
+                targetMaxScroll * (1 - weight) + targetScrollTop * weight;
+        }
+
+        if (!Number.isFinite(targetScrollTop)) {
+            this.syncPreviewByRatio();
+            return;
+        }
+
+        this.setPreviewScrollTop(targetScrollTop, {smooth: true});
+    }
+
+    initToolbar() {
+        // 注册快捷键
+        const registerShortcut = (btn, shortcut, callback) => {
+            const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+
+            // 校验快捷键格式是否正确
+            const isValidShortcut = /^([a-zA-Z0-9]|F[1-9]|10|11|12|\+)+$/.test(
+                shortcut
+            );
+            if (!isValidShortcut) {
+                console.error("无效的快捷键格式");
+                return false;
+            }
+
+            // 处理大小写问题
+            shortcut = shortcut.toLowerCase();
+
+            // 检查是否为Mac系统，如果是，则将ctrl替换为cmd
+            if (isMac) {
+                shortcut = shortcut.replace("ctrl", "cmd");
+            }
+
+            // 创建keydown事件处理函数
+            const handleKeyDown = (event) => {
+                if (!this.isFocused()) {
+                    // 只有在textarea处于焦点状态时响应快捷键事件
+                    return false;
+                }
+
+                const pressedKeys = [];
+                if (event.ctrlKey) {
+                    pressedKeys.push("ctrl");
+                }
+                if (event.altKey) {
+                    pressedKeys.push("alt");
+                }
+                if (event.shiftKey) {
+                    pressedKeys.push("shift");
+                }
+
+                // 只在有修饰键按下的情况下响应字母和数字键
+                if (/[a-zA-Z0-9]/.test(event.key) && pressedKeys.length > 0) {
+                    pressedKeys.push(event.key.toLowerCase());
+                }
+
+                const pressedShortcut = pressedKeys.join("+");
+
+                if (pressedShortcut === shortcut) {
+                    event.preventDefault(); // 阻止浏览器默认行为
+                    event.stopPropagation(); // 阻止事件冒泡
+                    event.objectTarget = btn;
+                    callback.call(this, event);
+                }
+            };
+
+            // 绑定keydown事件到document
+            document.addEventListener("keydown", handleKeyDown);
+
+            return true;
+        };
+
+        // 创建按钮
+        const createButton = (attrs = {}) => {
+            let btn = $C(
+                "li",
+                {
+                    ...attrs,
+                    title: attrs.name,
+                },
+                ["icon", "command", "onMounted"]
+            );
+            btn.classList.add("wmd-button");
+            let icon = $(attrs.icon);
+            if (icon.length) {
+                btn.appendChild(icon.get(0));
+            } else {
+                btn.innerHTML = attrs.icon;
+            }
+            // 检查是否存在shortcut属性
+            if (attrs.shortcut) {
+                if (registerShortcut(btn, attrs.shortcut, this.handleHotkey)) {
+                    // 注册按键，成功才修改 title
+                    btn.title = `${attrs.name} ${attrs.shortcut.toUpperCase()}`;
+                }
+            }
+
+            if ("command" in attrs) {
+                if (typeof attrs.command === "function") {
+                    btn.addEventListener("click", () => {
+                        attrs.command.call(this, {target: btn});
+                    });
+                } else {
+                    btn.setAttribute("onclick", attrs.command);
+                }
+            }
+
+            return btn;
+        };
+
+        // 创建分隔符
+        const createSplitter = (num = 0, attrs) => {
+            let el = $C("li", {
+                id: sprintf("wmd-spacer%d-yumeeditor", num),
+                ...attrs,
+            });
+            el.classList.add("wmd-spacer");
+            el.classList.add(sprintf("wmd-spacer%d", num));
+            return el;
+        };
+
+        const getSpacerCount = () => {
+            return $("#wmd-button-bar-yumeeditor .wmd-spacer").length;
+        };
+
+        this.toolbar = $("#wmd-button-row-yumeeditor");
+        this.buttons.forEach((btnCfg) => {
+            let el,
+                isExists = false;
+            if ("id" in btnCfg) {
+                if (document.getElementById(btnCfg.id)) {
+                    el = document.getElementById(btnCfg.id);
+                    isExists = true;
+                    if ("icon" in btnCfg) {
+                        el.innerHTML = btnCfg.icon;
+                    }
+                } else if ("name" in btnCfg) {
+                    if (!("icon" in btnCfg)) {
+                        btnCfg.icon = `<span>${name}</span>`;
+                    }
+                    el = createButton(btnCfg);
+                } else {
+                    el = createSplitter(getSpacerCount() + 1, btnCfg);
+                }
+            } else {
+                el = createSplitter(getSpacerCount() + 1, btnCfg);
+            }
+
+            let isInserted = false,
+                refNode;
+
+            /**
+             * 获取插入参考节点
+             *
+             * @param {string} refSel 参考节点或者参考节点选择器
+             * @param {*} parent
+             * @return {*|jQuery|HTMLElement}
+             */
+            const getRefNode = (refSel, parent) => {
+                if (!parent) parent = this.toolbar;
+                if (isString(refSel)) {
+                    if (refSel.indexOf("|") > -1) {
+                        let selArr = refSel.split("|");
+                        for (let i = 0; i < selArr.length; i++) {
+                            let el = getRefNode(selArr[i], parent);
+                            if (el.length) return el;
+                        }
+                    } else {
+                        return $(refSel, parent);
+                    }
+                }
+            };
+
+            if ("insertBefore" in btnCfg) {
+                refNode = getRefNode(btnCfg.insertBefore, this.toolbar);
+                if (refNode) {
+                    refNode.before(el);
+                    isInserted = true;
+                }
+            } else if ("insertAfter" in btnCfg) {
+                refNode = getRefNode(btnCfg.insertAfter, this.toolbar);
+                if (refNode) {
+                    refNode.after(el);
+                    isInserted = true;
+                }
+            } else if ("remove" in btnCfg && btnCfg.remove && el.parentNode) {
+                el.parentNode.removeChild(el);
+            }
+
+            if (!isInserted && !isExists) {
+                this.toolbar.append(el);
+            }
+            if (typeof btnCfg.onMounted === "function") {
+                btnCfg.onMounted.call(this, {
+                    target: el,
+                });
+            }
+        });
+    }
+
+    handleHotkey({objectTarget}) {
+        objectTarget.click();
+    }
+
+    handlePreviewEnd() {
+        this.refreshPreviewElements();
+        this.stopPreviewSettle();
+        initFenceGrid(this.previewArea);
+        initFenceMasonry(this.previewArea);
+        initFenceTabs(this.previewArea);
+        this.rebuildPreviewLineAnchors();
+        this.previewPrefersRatioSync = this.shouldPreferRatioPreviewSync();
+        this.schedulePreviewScrollSync(true);
+        this.clearPendingPreviewSyncTimers();
+        [120, 320].forEach((delay) => {
+            const timerId = window.setTimeout(() => {
+                this.schedulePreviewScrollSync();
+            }, delay);
+            this.pendingPreviewSyncTimers.push(timerId);
+        });
+    }
+
+    /**
+     * 获取文本框文本
+     *
+     * @returns {string}
+     */
+    getContent() {
+        return this.textarea.getContent();
+    }
+
+    /**
+     * 设置文本框文本（记录到 UndoStack）
+     *
+     * @param {string} text
+     */
+    setContent(text) {
+        this.textarea.executeAndAddUndoStack("setContent", text);
+    }
+
+    /**
+     * 往光标虽在位置插入文本（记录到 UndoStack）
+     *
+     * @param {string} text
+     */
+    insertText(text) {
+        this.textarea.executeAndAddUndoStack("insertText", text);
+    }
+
+    /**
+     * 替换文本框选中文本（记录到 UndoStack）
+     *
+     * @param {string} text
+     */
+    replaceSelection(text) {
+        if (this.getSelectedText()) {
+            this.textarea.executeAndAddUndoStack("replaceSelectionText", text);
+        } else {
+            this.textarea.executeAndAddUndoStack("insertText", text);
+        }
+    }
+
+    /**
+     * 获取选中文本
+     *
+     * @return {string}
+     */
+    getSelectedText() {
+        return this.textarea.getSelectedText();
+    }
+
+    /**
+     * 获取选中区域的起止位置
+     * @returns {{start: number, end: number}}
+     */
+    getSelection() {
+        return this.textarea.getSelection();
+    }
+
+    /**
+     * 设置选中区域的起止位置
+     * @param {number} start 起始位置
+     * @param {number} end 结束位置
+     */
+    setSelection(start, end) {
+        this.textarea.setSelection(start, end);
+    }
+
+    /**
+     * 判定是否聚焦到文本框了
+     *
+     * @returns {boolean}
+     */
+    isFocused() {
+        return this.textarea.isFocused;
+    }
+
+    /**
+     * 增加或移除选中文本的前后缀。
+     * @param {string} prefix - 前缀。
+     * @param {string} postfix - 后缀。
+     * @param {string} defaultText - 没有选中文本时插入到前缀和后缀之间的文本。
+     */
+    wrapSelection(prefix, postfix, defaultText = "") {
+        const {textarea} = this;
+        const selection = this.getSelection();
+        const selectedText = this.getSelectedText();
+        if (selectedText) {
+            // 情况 1: 选中的文本已经是一个完整的包裹块
+            if (selectedText.startsWith(prefix) && selectedText.endsWith(postfix)) {
+                const newText = selectedText.slice(
+                    prefix.length,
+                    selectedText.length - postfix.length
+                );
+
+                textarea.executeAndAddUndoStack("replaceSelectionText", newText);
+                // 更新光标，选中被解开包装的文本
+                textarea.setSelection(
+                    selection.start,
+                    selection.start + newText.length
+                );
+                return;
+            }
+            // 情况 2: 选中的文本是包裹块的“内容”部分
+            // 获取紧邻选中区域前后的文本
+            const textBefore = textarea.getTextInRange(0, selection.start);
+            const textAfter = textarea.getTextInRange(
+                selection.end,
+                textarea.getContent().length
+            );
+
+            if (textBefore.endsWith(prefix) && textAfter.startsWith(postfix)) {
+                // 确定完整的块在整个文本中的起始和结束位置
+                const fullBlockStart = selection.start - prefix.length;
+                const fullBlockEnd = selection.end + postfix.length;
+                // 先将选择区域扩展为整个块
+                textarea.setSelection(fullBlockStart, fullBlockEnd);
+                // 然后用原始选择的文本（即无前后缀的内容）替换整个块
+                textarea.executeAndAddUndoStack("replaceSelectionText", selectedText);
+                // 更新光标，选中被解开包装的文本
+                textarea.setSelection(
+                    fullBlockStart,
+                    fullBlockStart + selectedText.length
+                );
+                return;
+            }
+            // 情况 3: 以上都不是，执行包裹操作
+            const newText = prefix + selectedText + postfix;
+            textarea.executeAndAddUndoStack("replaceSelectionText", newText);
+            // 更新光标，选中被包裹的原始文本
+            textarea.setSelection(
+                selection.start + prefix.length,
+                selection.end + prefix.length
+            );
+        } else {
+            // 没有选中文本时，插入带有默认文本的包裹块
+            const newPrefix = textarea.isAtLineStart() ? prefix : "\n" + prefix;
+            const newPostfix = textarea.isAtLineEnd() ? postfix : postfix + "\n";
+            const newText = newPrefix + defaultText + newPostfix;
+            textarea.executeAndAddUndoStack("insertText", newText);
+
+            // 更新光标，选中插入的默认文本
+            const insertionStart = textarea.getSelection().start - newText.length;
+            textarea.setSelection(
+                insertionStart + newPrefix.length,
+                insertionStart + newPrefix.length + defaultText.length
+            );
+        }
+    }
+
+    /**
+     * 区块增加前缀。
+     * @param {string} prefix - 前缀。
+     * @param {string} defaultText - 没有选中文本时插入到前缀后面的文本。
+     */
+    blockPrefix(prefix, defaultText) {
+        const {textarea} = this;
+        let realSelectionText = textarea.getSelectedText();
+        defaultText || (defaultText = "");
+        if (realSelectionText.length) {
+            let realSelectionArr = realSelectionText.split("\n");
+            let newText = realSelectionArr
+                .map((line, i) => {
+                    return prefix.replace("%n", i + 1) + line;
+                })
+                .join("\n");
+            // 检查选中文本的第一行是否在行首，如果不是，在 newText 前添加换行符
+            if (!textarea.isAtLineStart()) {
+                newText = "\n" + newText;
+            }
+            textarea.executeAndAddUndoStack("replaceSelectionText", newText + "\n");
+        } else {
+            let newPrefix = prefix.replace("%n", 1),
+                newText = newPrefix + defaultText + "\n",
+                startPosFix = 0;
+            if (!textarea.isAtLineStart()) {
+                newText = "\n" + newText;
+                startPosFix = 1;
+            }
+            textarea.executeAndAddUndoStack("insertText", newText);
+            textarea.setSelection(
+                textarea.getSelection().start -
+                newText.length +
+                newPrefix.length +
+                startPosFix,
+                textarea.getSelection().start
+            );
+        }
+    }
+
+    /**
+     * 选中文本首行前缀处理。
+     * @param {string} prefix - 前缀。
+     * @param {string} defaultText - 没有选中文本时插入到前缀后面的文本。
+     */
+    firstSelectionLinePrefix(prefix, defaultText) {
+        const {textarea} = this;
+        let realSelectionText = textarea.getSelectedText();
+        if (realSelectionText.length) {
+            let realSelectionArr = realSelectionText.split("\n");
+            let firstLine = realSelectionArr[0];
+
+            // 判断选中的第一行是否以指定前缀开头
+            if (firstLine.startsWith(prefix)) {
+                // 去除前缀
+                firstLine = firstLine.substring(prefix.length);
+            } else {
+                let {start: startPos, end: endPos} = textarea.getSelection();
+                if (
+                    textarea.getTextInRange(startPos - prefix.length, startPos) === prefix
+                ) {
+                    textarea.setSelection(startPos - prefix.length, endPos);
+                } else {
+                    // 增加前缀
+                    firstLine = prefix + firstLine;
+                }
+            }
+
+            // 重新组合文本
+            realSelectionArr[0] = firstLine;
+            let newText = realSelectionArr.join("\n");
+
+            // 检查选中文本的第一行是否在行首，如果不是，在 newText 前添加换行符
+            if (!textarea.isAtLineStart()) {
+                newText = "\n" + newText;
+            }
+
+            textarea.executeAndAddUndoStack("replaceSelectionText", newText);
+        } else {
+            let newPrefix = prefix.replace("%n", 1);
+            let newText,
+                startPosFix = 0;
+
+            if (textarea.isAtLineStart()) {
+                newText = newPrefix + defaultText;
+            } else {
+                newText = "\n" + newPrefix + defaultText;
+                startPosFix = 1;
+            }
+
+            textarea.executeAndAddUndoStack("insertText", newText);
+
+            // 设置光标位置
+            textarea.setSelection(
+                textarea.getSelection().start -
+                newText.length +
+                newPrefix.length +
+                startPosFix,
+                textarea.getSelection().start
+            );
+        }
+    }
+
+    getInitialFormValues(fields = [], initialValues = {}) {
+        const values = {};
+        fields.forEach((field) => {
+            if (!field?.name) {
+                return;
+            }
+            let value = initialValues[field.name];
+            if (value === undefined && "value" in field) {
+                value = field.value;
+            }
+            if (field.type === "checkbox") {
+                values[field.name] = Boolean(value);
+                return;
+            }
+            values[field.name] = value ?? "";
+        });
+        return values;
+    }
+
+    resolveFieldHidden(field = {}, values = {}) {
+        if (typeof field.hidden === "function") {
+            return Boolean(field.hidden(values));
+        }
+        return Boolean(field.hidden);
+    }
+
+    renderFormField(field = {}, rawValue) {
+        if (!field?.name) {
+            return "";
+        }
+        const value = rawValue ?? "";
+        const fieldName = escapeAttribute(field.name);
+        const fieldId = escapeAttribute(
+            field.id || `ym-modal-field-${field.name.replace(/[^a-zA-Z0-9_-]/g, "-")}`
+        );
+        const wrapperClasses = ["form-item"];
+        if (field.type === "textarea") {
+            wrapperClasses.push("for-textarea");
+        }
+        if (field.className) {
+            wrapperClasses.push(field.className);
+        }
+        const labelClasses = [];
+        if (field.labelClass) {
+            labelClasses.push(field.labelClass);
+        }
+        if (field.required) {
+            labelClasses.push("required");
+        }
+        const hiddenAttr = field.hidden ? ' hidden="true"' : "";
+        const requiredAttr = field.required ? " required" : "";
+        const placeholderAttr = field.placeholder
+            ? ` placeholder="${escapeAttribute(field.placeholder)}"`
+            : "";
+        const minAttr =
+            field.type === "number" && field.min !== undefined
+                ? ` min="${escapeAttribute(field.min)}"`
+                : "";
+        const inputClassAttr = field.inputClass
+            ? ` class="${escapeAttribute(field.inputClass)}"`
+            : "";
+        const label = field.label === false
+            ? ""
+            : `<label for="${fieldId}"${
+                labelClasses.length
+                    ? ` class="${escapeAttribute(labelClasses.join(" "))}"`
+                    : ""
+            }>${escapeHtml(field.label || "")}</label>`;
+
+        if (field.type === "select") {
+            const options = (field.options || [])
+                .map((option) => {
+                    const optionValue = isObject(option) ? option.value : option;
+                    const optionLabel = isObject(option)
+                        ? option.label ?? option.value
+                        : option;
+                    const selectedAttr =
+                        String(optionValue) === String(value) ? " selected" : "";
+                    return `<option value="${escapeAttribute(optionValue)}"${selectedAttr}>${escapeHtml(optionLabel)}</option>`;
+                })
+                .join("");
+            return `<div class="${escapeAttribute(wrapperClasses.join(" "))}" data-field-name="${fieldName}"${hiddenAttr}>${label}<select id="${fieldId}" name="${fieldName}"${requiredAttr}${inputClassAttr}>${options}</select></div>`;
+        }
+
+        if (field.type === "textarea") {
+            const rowsAttr = field.rows ? ` rows="${escapeAttribute(field.rows)}"` : "";
+            return `<div class="${escapeAttribute(wrapperClasses.join(" "))}" data-field-name="${fieldName}"${hiddenAttr}>${label}<textarea id="${fieldId}" name="${fieldName}"${requiredAttr}${placeholderAttr}${rowsAttr}${inputClassAttr}>${escapeHtml(value)}</textarea></div>`;
+        }
+
+        if (field.type === "checkbox") {
+            const checkedAttr = value ? " checked" : "";
+            if (field.switch) {
+                return `<div class="${escapeAttribute(wrapperClasses.join(" "))}" data-field-name="${fieldName}"${hiddenAttr}>${label}<input type="checkbox" id="${fieldId}" name="${fieldName}" switch${checkedAttr}${requiredAttr}${inputClassAttr}><label class="form-switcher" for="${fieldId}"></label></div>`;
+            }
+            return `<div class="${escapeAttribute(wrapperClasses.join(" "))}" data-field-name="${fieldName}"${hiddenAttr}>${label}<input type="checkbox" id="${fieldId}" name="${fieldName}"${checkedAttr}${requiredAttr}${inputClassAttr}></div>`;
+        }
+
+        const inputType = field.type || "text";
+        const valueAttr = ` value="${escapeAttribute(value)}"`;
+        return `<div class="${escapeAttribute(wrapperClasses.join(" "))}" data-field-name="${fieldName}"${hiddenAttr}>${label}<input type="${escapeAttribute(inputType)}" id="${fieldId}" name="${fieldName}"${valueAttr}${requiredAttr}${placeholderAttr}${minAttr}${inputClassAttr}></div>`;
+    }
+
+    collectFormValues(formElm) {
+        const values = {};
+        if (!formElm) {
+            return values;
+        }
+        const elements = Array.from(formElm.querySelectorAll("[name]"));
+        const processedNames = new Set();
+
+        elements.forEach((element) => {
+            const {name} = element;
+            if (!name || processedNames.has(name)) {
+                return;
+            }
+            processedNames.add(name);
+
+            if (element instanceof HTMLInputElement && element.type === "checkbox") {
+                values[name] = element.checked;
+                return;
+            }
+
+            if (element instanceof HTMLInputElement && element.type === "number") {
+                values[name] = element.value === "" ? "" : Number(element.value);
+                return;
+            }
+
+            values[name] = element.value;
+        });
+
+        return values;
+    }
+
+    animateRequiredField(element) {
+        if (!element) {
+            return;
+        }
+        element.classList.add("required-animate");
+        window.setTimeout(() => {
+            element.classList.remove("required-animate");
+        }, 800);
+    }
+
+    validateForm(formElm) {
+        if (!formElm) {
+            return true;
+        }
+        let isValid = true;
+        const elements = Array.from(formElm.querySelectorAll("[name]"));
+
+        elements.forEach((element) => {
+            if (!element.required || element.closest('.form-item[hidden="true"]')) {
+                return;
+            }
+
+            const isCheckbox =
+                element instanceof HTMLInputElement && element.type === "checkbox";
+            const hasValue = isCheckbox
+                ? element.checked
+                : String(element.value || "").trim() !== "";
+
+            if (!hasValue) {
+                isValid = false;
+                this.animateRequiredField(element);
+            }
+        });
+
+        return isValid;
+    }
+
+    syncFormFieldVisibility(modalElm, fields = [], values = {}) {
+        fields.forEach((field) => {
+            if (!field?.name) {
+                return;
+            }
+            const wrapper = Array.from(modalElm.querySelectorAll(".form-item")).find(
+                (item) => item.dataset.fieldName === field.name
+            );
+            if (!wrapper) {
+                return;
+            }
+            const isHidden = this.resolveFieldHidden(field, values);
+            wrapper.setAttribute("hidden", isHidden ? "true" : "false");
+            wrapper.classList.toggle("hidden", isHidden);
+        });
+    }
+
+    openFormModal(options = {}) {
+        const modalOptions = Object.assign(
+            {
+                title: "标题",
+                fields: [],
+                initialValues: {},
+                onSubmit: function () {
+                    return true;
+                },
+                onChange: function () {
+                },
+                validate: function () {
+                    return true;
+                },
+                showFooter: true,
+            },
+            options
+        );
+        const initialValues = this.getInitialFormValues(
+            modalOptions.fields,
+            modalOptions.initialValues
+        );
+        const innerHTML = modalOptions.fields
+            .map((field) => {
+                return this.renderFormField(
+                    {
+                        ...field,
+                        hidden: this.resolveFieldHidden(field, initialValues),
+                    },
+                    initialValues[field.name]
+                );
+            })
+            .join("");
+
+        this.openModal({
+            title: modalOptions.title,
+            innerHTML,
+            showFooter: modalOptions.showFooter,
+            checkEmptyOnConfirm: true,
+            handle: (modalElm) => {
+                this.syncFormFieldVisibility(modalElm, modalOptions.fields, initialValues);
+                modalOptions.onChange.call(this, modalElm, {...initialValues});
+            },
+            change: (modalElm, values) => {
+                this.syncFormFieldVisibility(modalElm, modalOptions.fields, values);
+                modalOptions.onChange.call(this, modalElm, values);
+            },
+            confirm: (modalElm, values) => {
+                if (modalOptions.validate.call(this, modalElm, values) === false) {
+                    return false;
+                }
+                return modalOptions.onSubmit.call(this, modalElm, values);
+            },
+        });
+    }
+
+    /**
+     * 打开模态框 (参考 Joe 主题)
+     * @param options
+     */
+    openModal(options = {}) {
+        const _modalOptions = {
+            title: "标题",
+            innerHTML: "内容",
+            showFooter: true,
+            checkEmptyOnConfirm: true,
+            change: function (modal, params) {
+            },
+            confirm: function (modal, params) {
+                return true;
+            },
+            cancel: function (event) {
+            },
+            handle: function (modal) {
+            },
+            callback: function (modal) {
+            },
+        };
+        let modalOptions = Object.assign(_modalOptions, options);
+        let contentWrap = modalOptions.checkEmptyOnConfirm
+            ? '<form class="params"></form>'
+            : "";
+        if ($("#ym-modal").length < 1) {
+            $("#ym-wrapper").append(`<div id="ym-modal" class="ym-modal">
+    <div class="ym-modal-frame">
+    <div class="ym-modal-header">
+        <div class="ym-modal-header-title"></div><div class="ym-modal-header-close"><i class="close-icon"></i></div>
+</div>
+    <div class="ym-modal-body">
+        ${contentWrap}
+    </div>
+    <div class="ym-modal-footer">
+        <button type="button" class="ym-modal-footer-button ym-modal-footer-cancel">取消</button><button type="button" class="ym-modal-footer-button ym-modal-footer-confirm">确定</button>
+    </div>
+</div>
+</div>`);
+        }
+        $(".ym-modal-header-title").text(modalOptions.title);
+        if (modalOptions.checkEmptyOnConfirm) {
+            const form = $(".ym-modal-body .params").empty();
+            if (isElement(modalOptions.innerHTML)) {
+                form.append(modalOptions.innerHTML);
+            } else {
+                form.html(modalOptions.innerHTML);
+            }
+        } else {
+            const body = $(".ym-modal-body").empty();
+            if (isElement(modalOptions.innerHTML)) {
+                body.append(modalOptions.innerHTML);
+            } else {
+                body.html(modalOptions.innerHTML);
+            }
+        }
+        let modalElm = $("#ym-modal").get(0);
+        modalOptions.showFooter
+            ? $(`.ym-modal-footer`).show()
+            : $(".ym-modal-footer").hide();
+        $("body").addClass("no-scroll");
+        modalOptions.handle.call(this, modalElm);
+        $(".ym-modal-footer-confirm").on("click", () => {
+            let params = {};
+            let flag = true;
+            if (modalOptions.checkEmptyOnConfirm) {
+                const formElm = $("#ym-modal .ym-modal-body .params").get(0);
+                params = this.collectFormValues(formElm);
+                flag = this.validateForm(formElm);
+            }
+            if (flag && modalOptions.confirm.call(this, modalElm, params)) {
+                $("#ym-modal").remove();
+                $("body").removeClass("no-scroll");
+                modalOptions.callback.call(this, modalElm);
+            }
+        });
+        $(".ym-modal-header-close").on("click", (event) => {
+            modalOptions.cancel.call(this, event);
+            $("#ym-modal").removeClass("active");
+            setTimeout(function () {
+                $("#ym-modal").remove();
+                $("body").removeClass("no-scroll");
+            }, 300);
+        });
+        $(".ym-modal-footer-cancel").on("click", (event) => {
+            $("#ym-modal").removeClass("active");
+            modalOptions.cancel.call(modalElm, event);
+            setTimeout(function () {
+                $("#ym-modal").remove();
+                $("body").removeClass("no-scroll");
+            }, 300);
+        });
+        let form = $(".params", modalElm);
+        $("input,select,textarea", form).on("change input", () => {
+            let params = this.collectFormValues(form.get(0));
+            modalOptions.change.call(this, modalElm, params);
+        });
+        $("#ym-modal").addClass("active");
+    }
+
+    /**
+     * 来自 Wordpress
+     * https://regex101.com/r/ja0b1p/1
+     * $0→code $2→tag $3→attr $5→text
+     * @param tag
+     * @returns {RegExp}
+     */
+    getShortCodeRegex(tag) {
+        return new RegExp(
+            "\\[(\\[?)(" +
+            tag +
+            ")(?![\\w-])([^\\]\\/]*(?:\\/(?!\\])[^\\]\\/]*)*?)(?:(\\/)\\]|\\](?:([^\\[]*(?:\\[(?!\\/\\2\\])[^\\[]*)*)(\\[\\/\\2\\]))?)(\\]?)",
+            "g"
+        );
+    }
+}
+
+new YumeEditor("#text", "#wmd-preview-yumeeditor");

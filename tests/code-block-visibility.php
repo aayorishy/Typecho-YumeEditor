@@ -1,0 +1,148 @@
+<?php
+
+namespace Widget {
+    class User
+    {
+        public static $allowed = false;
+
+        public static function alloc()
+        {
+            return new self();
+        }
+
+        public function pass($role, $return)
+        {
+            return self::$allowed;
+        }
+
+        public function hasLogin()
+        {
+            return false;
+        }
+    }
+}
+
+namespace Typecho {
+    class Cookie
+    {
+        public static function get($name)
+        {
+            return null;
+        }
+    }
+
+    class Db
+    {
+        public static function get()
+        {
+            return new self();
+        }
+
+        public function select()
+        {
+            throw new \RuntimeException('The test must not access a database');
+        }
+    }
+}
+
+namespace {
+    use TypechoPlugin\YumeEditor\HyperDown;
+    use TypechoPlugin\YumeEditor\Content;
+    use Widget\User;
+
+    define('__TYPECHO_ROOT_DIR__', dirname(__DIR__));
+    require_once dirname(__DIR__) . '/Util.php';
+    require_once dirname(__DIR__) . '/Content.php';
+    require_once dirname(__DIR__) . '/HyperDown.php';
+
+    function _t($message, ...$args)
+    {
+        return $args ? vsprintf($message, $args) : $message;
+    }
+
+    function codeTexts($html)
+    {
+        $dom = new DOMDocument();
+        $previousErrors = libxml_use_internal_errors(true);
+        try {
+            if (!$dom->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD)) {
+                throw new RuntimeException('Failed to parse HTML fixture');
+            }
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previousErrors);
+        }
+        $texts = [];
+        foreach ((new DOMXPath($dom))->query('//pre | //code') as $node) {
+            $texts[] = $node->textContent;
+        }
+        return $texts;
+    }
+
+    $archive = new class {
+        public $cid = 1;
+        public $permalink = 'https://example.test/post';
+
+        public function remember($name, $return)
+        {
+            return '';
+        }
+    };
+
+    $cases = [
+        'markdown reproducer' => (new HyperDown())->makeHtml("::: pass:comment\n`SECRET_CODE`\n:::\n\nVisible `PUBLIC_CODE`"),
+        'attributed fenced code' => (new HyperDown())->makeHtml("::: pass:comment\n~~~text\nSECRET_CODE [x]\n~~~\n:::\n\n~~~text\nPUBLIC_CODE [ ]\n~~~"),
+        'multiple hidden blocks' => '<p><code>PUBLIC_BEFORE</code></p><div class="fence-pass-comment"><div class="fence-content"><code>SECRET_ONE</code></div></div><p><code>PUBLIC_CODE</code></p><div class="fence-pass-comment"><div class="fence-content"><pre>SECRET_TWO</pre></div></div><p><code>PUBLIC_AFTER</code></p>',
+        'nested hidden blocks' => '<div class="fence-pass-comment"><div class="fence-content"><code>SECRET_OUTER</code><div class="fence-pass-comment"><div class="fence-content"><code>SECRET_INNER</code></div></div></div></div><p><pre>PUBLIC_CODE</pre></p>',
+        'literal placeholder collision' => '<pre>__BLOCK__</pre><pre>__YUMEEDITOR_CODE_0__</pre><pre>&#95;&#95;YUMEEDITOR_CODE__0__</pre><div class="fence-pass-comment"><div class="fence-content"><code>SECRET_CODE</code></div></div><p><code>PUBLIC_CODE</code></p>',
+        'DOM-normalized placeholder collision' => '<div class="fence-pass-comment"><div class="fence-content"><code>SECRET_ATTACK</code></div></div><pre >&#95&#95YUMEEDITOR_CODE_0__</pre><p><code>PUBLIC_CODE</code></p>',
+    ];
+
+    foreach ($cases as $name => $html) {
+        foreach ([false, true] as $allowed) {
+            User::$allowed = $allowed;
+            $content = html_entity_decode(Content::contentEx($html, $archive, null), ENT_QUOTES, 'UTF-8');
+            $excerpt = html_entity_decode(Content::excerptEx($html, $archive, null), ENT_QUOTES, 'UTF-8');
+            $originalCodes = codeTexts($html);
+            $publicCodes = array_values(array_filter($originalCodes, function ($code) {
+                return strpos($code, 'SECRET') === false;
+            }));
+            if (codeTexts($content) !== ($allowed ? $originalCodes : $publicCodes)
+                || codeTexts($excerpt) !== $publicCodes) {
+                throw new RuntimeException('Failed code identity or order: ' . $name);
+            }
+            if (strpos($content, 'PUBLIC_CODE') === false
+                || strpos($excerpt, 'PUBLIC_CODE') === false
+                || strpos($excerpt, 'SECRET') !== false
+                || (strpos($content, 'SECRET') !== false) !== $allowed) {
+                throw new RuntimeException('Failed visibility: ' . $name);
+            }
+            foreach (['PUBLIC_BEFORE', 'PUBLIC_AFTER', '__BLOCK__', '__YUMEEDITOR_CODE_0__', '__YUMEEDITOR_CODE__0__'] as $literal) {
+                if (strpos(html_entity_decode($html, ENT_QUOTES, 'UTF-8'), $literal) !== false
+                    && (strpos($content, $literal) === false || strpos($excerpt, $literal) === false)) {
+                    throw new RuntimeException('Failed public content: ' . $name . ' / ' . $literal);
+                }
+            }
+            if ($allowed) {
+                foreach (['SECRET_CODE', 'SECRET_ONE', 'SECRET_TWO', 'SECRET_OUTER', 'SECRET_INNER'] as $secret) {
+                    if (strpos($html, $secret) !== false && strpos($content, $secret) === false) {
+                        throw new RuntimeException('Failed authorized content: ' . $name);
+                    }
+                }
+            }
+        }
+    }
+
+    foreach ([
+        '<p><code>[x] __BLOCK__</code></p><pre>[ ] PUBLIC_CODE</pre>',
+        '<pre class="yumeeditor-code-block"><code class="language-text">[x] [ ] PUBLIC_CODE</code></pre>',
+        '<p><code title="example">[x] [ ] PUBLIC_CODE</code></p>',
+        (new HyperDown())->makeHtml("~~~text\n[x] [ ] PUBLIC_CODE\n~~~"),
+    ] as $plain) {
+        if (Content::contentEx($plain, $archive, null) !== $plain || Content::excerptEx($plain, $archive, null) !== $plain) {
+            throw new RuntimeException('Failed unchanged public code');
+        }
+    }
+
+    echo "code-block visibility tests passed\n";
+}
